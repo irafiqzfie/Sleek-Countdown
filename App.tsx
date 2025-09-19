@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 // --- HELPER COMPONENTS (defined outside App to prevent re-creation on re-renders) ---
 
@@ -29,6 +29,7 @@ const TimeUnitInput: React.FC<TimeUnitInputProps> = ({ label, value, onChange, m
         className="w-24 h-24 bg-slate-800 text-white text-center text-4xl rounded-full p-2 focus:outline-none focus:ring-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
         min="0"
         max={max}
+        aria-label={`Set ${label}`}
       />
       <label className="text-sm font-medium text-slate-400 uppercase tracking-wider">{label}</label>
     </div>
@@ -50,7 +51,7 @@ const CircularProgress: React.FC<CircularProgressProps> = ({ percentage, size, s
 
   return (
     <div className="relative flex flex-col items-center justify-center">
-      <svg width={size} height={size} className="-rotate-90">
+      <svg width={size} height={size} className="-rotate-90" aria-hidden="true">
         <circle
           className="text-slate-700/50"
           stroke="currentColor"
@@ -85,6 +86,13 @@ const CircularProgress: React.FC<CircularProgressProps> = ({ percentage, size, s
 
 // --- MAIN APP COMPONENT ---
 
+const PREDEFINED_SOUNDS = [
+  { name: 'Alarm Clock', url: 'https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg' },
+  { name: 'Bell Timer', url: 'https://actions.google.com/sounds/v1/alarms/bell_timer.ogg' },
+  { name: 'Digital Watch', url: 'https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg' },
+  { name: 'Notification', url: 'https://actions.google.com/sounds/v1/notifications/positive_notification.ogg' },
+];
+
 const App: React.FC = () => {
   const [time, setTime] = useState({ days: 0, hours: 0, minutes: 1, seconds: 30 });
   const [totalSeconds, setTotalSeconds] = useState(0);
@@ -92,7 +100,11 @@ const App: React.FC = () => {
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
-  
+
+  const [selectedSound, setSelectedSound] = useState<string>(PREDEFINED_SOUNDS[0].url);
+  const [customSoundName, setCustomSoundName] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
   const handleTimeChange = useCallback((unit: keyof typeof time, value: number) => {
     setTime(prev => ({ ...prev, [unit]: value }));
   }, []);
@@ -107,6 +119,7 @@ const App: React.FC = () => {
             clearInterval(interval!);
             setIsActive(false);
             setIsFinished(true);
+            audioRef.current?.play().catch(error => console.error("Audio playback failed:", error));
             return 0;
           }
           return prevSeconds - 1;
@@ -142,8 +155,38 @@ const App: React.FC = () => {
     setIsFinished(false);
     setTotalSeconds(0);
     setInitialTotalSeconds(0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
     // Optional: Reset time inputs to a default
     // setTime({ days: 0, hours: 0, minutes: 1, seconds: 30 });
+  };
+
+  const handleSoundChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedSound(e.target.value);
+    if (PREDEFINED_SOUNDS.some(s => s.url === e.target.value)) {
+      setCustomSoundName(null);
+    }
+  };
+
+  const handleCustomSoundUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('audio/')) {
+        alert('Please upload a valid audio file.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target?.result as string;
+        if (dataUrl) {
+          setCustomSoundName(file.name);
+          setSelectedSound(dataUrl);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const timeLeft = useMemo(() => {
@@ -159,20 +202,13 @@ const App: React.FC = () => {
       return { days: 0, hours: 0, minutes: 0, seconds: 0 };
     }
 
-    // These values represent the smoothly decreasing time in each unit.
-    // e.g., minutesForProgress will be 29.5 when 29 minutes and 30 seconds are left in the current hour.
     const daysForProgress = totalSeconds / 86400;
     const hoursForProgress = (totalSeconds % 86400) / 3600;
     const minutesForProgress = (totalSeconds % 3600) / 60;
     const secondsForProgress = totalSeconds % 60;
-
-    // For the days circle, the progress is relative to the total initial duration.
-    // This makes it an overall progress indicator.
+    
     const initialTotalDays = initialTotalSeconds / 86400;
     const daysPercentage = initialTotalDays > 0 ? (daysForProgress / initialTotalDays) * 100 : 0;
-
-    // For smaller units, progress is relative to their containing unit (e.g., hours out of 24, minutes out of 60).
-    // This creates a familiar "clock-like" feel where the hands move smoothly.
     const hoursPercentage = (hoursForProgress / 24) * 100;
     const minutesPercentage = (minutesForProgress / 60) * 100;
     const secondsPercentage = (secondsForProgress / 60) * 100;
@@ -191,6 +227,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-900 font-sans">
+      <audio ref={audioRef} src={selectedSound} preload="auto" />
       <header className="text-center mb-10">
         <h1 className="text-4xl md:text-5xl font-bold text-white">Sleek Countdown Timer</h1>
         <p className="text-slate-400 mt-2">Set a duration and watch the time fly.</p>
@@ -203,11 +240,40 @@ const App: React.FC = () => {
           </div>
         )}
         {!isActive && !isFinished && (
-          <div className="flex justify-center items-start space-x-2 md:space-x-4">
-            <TimeUnitInput label="Days" value={time.days} onChange={v => handleTimeChange('days', v)} max={99} disabled={isActive} />
-            <TimeUnitInput label="Hours" value={time.hours} onChange={v => handleTimeChange('hours', v)} max={23} disabled={isActive} />
-            <TimeUnitInput label="Minutes" value={time.minutes} onChange={v => handleTimeChange('minutes', v)} max={59} disabled={isActive} />
-            <TimeUnitInput label="Seconds" value={time.seconds} onChange={v => handleTimeChange('seconds', v)} max={59} disabled={isActive} />
+          <div>
+            <div className="flex justify-center items-start space-x-2 md:space-x-4">
+              <TimeUnitInput label="Days" value={time.days} onChange={v => handleTimeChange('days', v)} max={99} disabled={isActive} />
+              <TimeUnitInput label="Hours" value={time.hours} onChange={v => handleTimeChange('hours', v)} max={23} disabled={isActive} />
+              <TimeUnitInput label="Minutes" value={time.minutes} onChange={v => handleTimeChange('minutes', v)} max={59} disabled={isActive} />
+              <TimeUnitInput label="Seconds" value={time.seconds} onChange={v => handleTimeChange('seconds', v)} max={59} disabled={isActive} />
+            </div>
+            <div className="mt-8 pt-6 border-t border-slate-700">
+              <label htmlFor="sound-select" className="block mb-3 text-sm font-medium text-slate-400 uppercase tracking-wider text-center">
+                Alert Sound
+              </label>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <select
+                  id="sound-select"
+                  value={selectedSound}
+                  onChange={handleSoundChange}
+                  className="bg-slate-700 border border-slate-600 text-white text-sm rounded-lg focus:ring-cyan-500 focus:border-cyan-500 block w-full sm:w-auto p-2.5"
+                >
+                  {PREDEFINED_SOUNDS.map(sound => (
+                    <option key={sound.name} value={sound.url}>{sound.name}</option>
+                  ))}
+                  {customSoundName && <option value={selectedSound}>{customSoundName}</option>}
+                </select>
+                <label className="cursor-pointer px-4 py-2 bg-slate-600 text-white font-semibold rounded-lg hover:bg-slate-500 transition-colors">
+                  Upload Custom
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={handleCustomSoundUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
           </div>
         )}
         {isActive && (
@@ -221,7 +287,6 @@ const App: React.FC = () => {
             {initialTotalSeconds >= 60 && (
               <CircularProgress percentage={progress.minutes} size={150} strokeWidth={10} label="Minutes" value={timeLeft.minutes} />
             )}
-            {/* Always show seconds if timer is active */}
             <CircularProgress percentage={progress.seconds} size={150} strokeWidth={10} label="Seconds" value={timeLeft.seconds} />
           </div>
         )}
