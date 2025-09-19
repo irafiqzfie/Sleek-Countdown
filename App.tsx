@@ -93,8 +93,13 @@ const PREDEFINED_SOUNDS = [
   { name: 'Notification', url: 'https://actions.google.com/sounds/v1/notifications/positive_notification.ogg' },
 ];
 
+const HISTORY_STORAGE_KEY = 'sleek-timer-history';
+const MAX_HISTORY_ITEMS = 5;
+
+type TimeObject = { days: number; hours: number; minutes: number; seconds: number; };
+
 const App: React.FC = () => {
-  const [time, setTime] = useState({ days: 0, hours: 0, minutes: 1, seconds: 30 });
+  const [time, setTime] = useState<TimeObject>({ days: 0, hours: 0, minutes: 1, seconds: 30 });
   const [totalSeconds, setTotalSeconds] = useState(0);
   const [initialTotalSeconds, setInitialTotalSeconds] = useState(0);
   const [isActive, setIsActive] = useState(false);
@@ -104,6 +109,21 @@ const App: React.FC = () => {
   const [selectedSound, setSelectedSound] = useState<string>(PREDEFINED_SOUNDS[0].url);
   const [customSoundName, setCustomSoundName] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  const [history, setHistory] = useState<TimeObject[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // Load history from localStorage on initial mount
+  useEffect(() => {
+    try {
+      const savedHistory = window.localStorage.getItem(HISTORY_STORAGE_KEY);
+      if (savedHistory) {
+        setHistory(JSON.parse(savedHistory));
+      }
+    } catch (error) {
+      console.error("Failed to load history from localStorage:", error);
+    }
+  }, []);
 
   const handleTimeChange = useCallback((unit: keyof typeof time, value: number) => {
     setTime(prev => ({ ...prev, [unit]: value }));
@@ -137,6 +157,26 @@ const App: React.FC = () => {
   const handleStart = () => {
     const seconds = time.days * 86400 + time.hours * 3600 + time.minutes * 60 + time.seconds;
     if (seconds > 0) {
+      // Add current time to history
+      setHistory(prevHistory => {
+        const newEntry = { ...time };
+        // Filter out the current time if it already exists to move it to the front
+        const filteredHistory = prevHistory.filter(
+            item =>
+                !(item.days === newEntry.days &&
+                item.hours === newEntry.hours &&
+                item.minutes === newEntry.minutes &&
+                item.seconds === newEntry.seconds)
+        );
+        const newHistory = [newEntry, ...filteredHistory].slice(0, MAX_HISTORY_ITEMS);
+        try {
+            window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(newHistory));
+        } catch (error) {
+            console.error("Failed to save history to localStorage:", error);
+        }
+        return newHistory;
+      });
+
       setTotalSeconds(seconds);
       setInitialTotalSeconds(seconds);
       setIsActive(true);
@@ -159,8 +199,6 @@ const App: React.FC = () => {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-    // Optional: Reset time inputs to a default
-    // setTime({ days: 0, hours: 0, minutes: 1, seconds: 30 });
   };
 
   const handleSoundChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -187,6 +225,20 @@ const App: React.FC = () => {
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleHistorySelect = (selectedTime: TimeObject) => {
+    setTime(selectedTime);
+    setIsHistoryOpen(false);
+  };
+
+  const formatHistoryItem = (item: TimeObject) => {
+    const parts = [];
+    if (item.days > 0) parts.push(`${item.days}d`);
+    if (item.hours > 0) parts.push(`${item.hours}h`);
+    if (item.minutes > 0) parts.push(`${item.minutes}m`);
+    if (item.seconds > 0) parts.push(`${item.seconds}s`);
+    return parts.length > 0 ? parts.join(' ') : "0s";
   };
 
   const timeLeft = useMemo(() => {
@@ -247,6 +299,7 @@ const App: React.FC = () => {
               <TimeUnitInput label="Minutes" value={time.minutes} onChange={v => handleTimeChange('minutes', v)} max={59} disabled={isActive} />
               <TimeUnitInput label="Seconds" value={time.seconds} onChange={v => handleTimeChange('seconds', v)} max={59} disabled={isActive} />
             </div>
+            
             <div className="mt-8 pt-6 border-t border-slate-700">
               <label htmlFor="sound-select" className="block mb-3 text-sm font-medium text-slate-400 uppercase tracking-wider text-center">
                 Alert Sound
@@ -273,6 +326,50 @@ const App: React.FC = () => {
                   />
                 </label>
               </div>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-slate-700">
+                <button
+                onClick={() => setIsHistoryOpen(prev => !prev)}
+                className="flex items-center justify-center w-full gap-2 text-slate-400 hover:text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-cyan-500 rounded-md p-2"
+                aria-expanded={isHistoryOpen}
+                aria-controls="history-panel"
+                >
+                <span className="text-sm font-medium uppercase tracking-wider">Recent Timers</span>
+                <svg
+                    className={`w-5 h-5 transition-transform duration-300 ${isHistoryOpen ? 'rotate-180' : ''}`}
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                >
+                    <path
+                    fillRule="evenodd"
+                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                    clipRule="evenodd"
+                    />
+                </svg>
+                </button>
+                {isHistoryOpen && (
+                <div
+                    id="history-panel"
+                    className="mt-3 max-h-40 overflow-y-auto bg-slate-900/70 rounded-lg p-2 space-y-1 animate-pop-in" // Simple pop-in animation
+                >
+                    {history.length > 0 ? (
+                    history.map((item, index) => (
+                        <button
+                        key={index}
+                        onClick={() => handleHistorySelect(item)}
+                        className="w-full text-center p-2.5 rounded-md hover:bg-slate-700 transition-colors focus:outline-none focus:bg-slate-700"
+                        aria-label={`Set timer to ${formatHistoryItem(item)}`}
+                        >
+                        {formatHistoryItem(item)}
+                        </button>
+                    ))
+                    ) : (
+                    <p className="text-slate-500 p-2 text-center text-sm">No recent timers.</p>
+                    )}
+                </div>
+                )}
             </div>
           </div>
         )}
