@@ -1,0 +1,5 @@
+{
+  "name": "Sleek Countdown Timer",
+  "description": "A sleek and modern countdown timer application built with React and Tailwind CSS. Set a duration, start the countdown, and watch the time tick away with a beautiful circular progress indicator.",
+  "requestFramePermissions": []
+}
